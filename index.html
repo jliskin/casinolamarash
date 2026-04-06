@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Casino La Marash – Blackjack</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── Player Setup Modal ─────────────────────────────────────── -->
+  <div id="setup-modal" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-logo">♛</div>
+      <div class="modal-title">Casino La Marash</div>
+      <div class="modal-subtitle">Blackjack</div>
+      <div class="setup-section">
+        <div class="setup-label">How many players?</div>
+        <div id="player-count-btns">
+          <button class="count-btn active" data-n="1">1</button>
+          <button class="count-btn" data-n="2">2</button>
+          <button class="count-btn" data-n="3">3</button>
+          <button class="count-btn" data-n="4">4</button>
+        </div>
+      </div>
+      <div id="player-names-section"></div>
+      <button id="btn-start-game" class="action-btn primary large">Start Game</button>
+    </div>
+  </div>
+
+  <!-- ── Blackjack Celebration Overlay ─────────────────────────── -->
+  <div id="celebration" class="hidden">
+    <div id="celebration-text"></div>
+    <div id="particles-container"></div>
+  </div>
+
+  <!-- ── Music Player ──────────────────────────────────────────── -->
+  <div id="music-player">
+    <button id="music-prev" title="Previous Track">◀</button>
+    <button id="music-toggle" title="Play/Pause">♪</button>
+    <button id="music-next" title="Next Track">▶</button>
+    <div id="music-info">
+      <div id="music-track-name">Velvet Lounge</div>
+      <div id="music-track-num">1 / 5</div>
+    </div>
+    <input type="range" id="music-volume" min="0" max="100" value="30" title="Volume">
+  </div>
+
+  <!-- ── Main Table ─────────────────────────────────────────────── -->
+  <div id="table">
+    <div id="casino-name">
+      <span class="crown">♛</span>
+      <span class="title">Casino La Marash</span>
+      <span class="crown">♛</span>
+    </div>
+    <div id="table-rule">Blackjack Pays 3 to 2 &nbsp;|&nbsp; Dealer must draw to 16 and stand on 17</div>
+
+    <!-- Dealer zone -->
+    <div id="dealer-zone">
+      <div id="dealer-avatar">
+        <div class="dealer-head">
+          <div class="dealer-face"></div>
+          <div class="dealer-eyes">
+            <div class="eye left"></div>
+            <div class="eye right"></div>
+          </div>
+          <div class="dealer-smile"></div>
+        </div>
+        <div class="dealer-body">
+          <div class="bow-tie"></div>
+        </div>
+      </div>
+      <div id="dealer-label">Dealer</div>
+      <div id="dealer-score" class="score-badge">0</div>
+      <div id="dealer-hand" class="hand"></div>
+      <div id="dealer-msg" class="dealer-speech"></div>
+    </div>
+
+    <!-- Chip arc decoration -->
+    <div id="chip-arc">
+      <div class="chip-deco c1"></div>
+      <div class="chip-deco c2"></div>
+      <div class="chip-deco c3"></div>
+      <div class="chip-deco c4"></div>
+      <div class="chip-deco c5"></div>
+    </div>
+
+    <!-- Players zone -->
+    <div id="players-zone"></div>
+
+    <!-- Controls -->
+    <div id="controls">
+      <div id="bet-panel" class="hidden">
+        <div id="betting-player-indicator" class="betting-indicator hidden"></div>
+        <span class="ctrl-label">Bet</span>
+        <div id="chip-buttons">
+          <button class="chip-btn" data-val="5">$5</button>
+          <button class="chip-btn" data-val="10">$10</button>
+          <button class="chip-btn" data-val="25">$25</button>
+          <button class="chip-btn" data-val="50">$50</button>
+          <button class="chip-btn" data-val="100">$100</button>
+        </div>
+        <div id="bet-display">$<span id="bet-amount">0</span></div>
+        <button id="btn-clear-bet" class="action-btn secondary">Clear</button>
+        <button id="btn-deal" class="action-btn primary">Deal</button>
+      </div>
+      <div id="action-panel" class="hidden">
+        <div id="action-player-name" class="action-indicator"></div>
+        <button id="btn-hit"    class="action-btn primary">Hit</button>
+        <button id="btn-stand"  class="action-btn secondary">Stand</button>
+        <button id="btn-double" class="action-btn gold">Double</button>
+      </div>
+      <div id="result-panel" class="hidden">
+        <div id="result-msg"></div>
+        <button id="btn-next" class="action-btn primary">Next Hand</button>
+      </div>
+    </div>
+
+    <!-- Bank bar -->
+    <div id="bank-bar">
+      <span class="bank-label" id="bank-player-label">Bank:</span>
+      <span id="bank-amount">$1,000</span>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

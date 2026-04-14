@@ -83,13 +83,17 @@ const DEALER_MESSAGES = {
 function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 let state = {
-  deck:       [],
-  players:    [],   // { name, bank, bet, hand, status }
-  dealer:     { hand: [], hiddenCard: null },
-  currentIdx: 0,
-  phase:      'betting',  // betting | playing | dealerTurn | result
-  bank:       1000,
-  bet:        0,
+  deck:          [],
+  players:       [],   // { name, bank, bet, hand, status, outcome }
+  dealer:        { hand: [], hiddenCard: null },
+  currentIdx:    0,
+  phase:         'betting',  // betting | playing | dealerTurn | result
+  // Multiplayer fields (persist across hands):
+  numPlayers:    1,
+  setupNames:    ['Player'],
+  setupBanks:    [1000],
+  bets:          [0],
+  currentBetIdx: 0,
 };
 
 // ── DOM refs ─────────────────────────────────────────────────────
@@ -136,9 +140,6 @@ function renderDealerHand(revealAll = false) {
     const hide = !revealAll && i === 1;
     dealerHandEl.appendChild(cardHTML(card, hide, false));
   });
-  const score = revealAll
-    ? handTotal(state.dealer.hand)
-    : cardValue(state.dealer.hand[0].rank);
   dealerScoreEl.textContent = revealAll
     ? scoreDisplay(state.dealer.hand)
     : cardValue(state.dealer.hand[0].rank);
@@ -202,45 +203,91 @@ function showPanel(name) {
   if (name) $(`${name}-panel`).classList.remove('hidden');
 }
 
-function updateBank() {
-  bankAmount.textContent = `$${state.bank.toLocaleString()}`;
+function updateBankForCurrent() {
+  const idx  = state.phase === 'playing' ? state.currentIdx : state.currentBetIdx;
+  const name = state.phase === 'playing'
+    ? (state.players[idx] ? state.players[idx].name : state.setupNames[idx])
+    : state.setupNames[idx];
+  const bank = state.setupBanks[idx] != null ? state.setupBanks[idx] : 0;
+  $('bank-player-label').textContent = `${name}:`;
+  bankAmount.textContent = `$${bank.toLocaleString()}`;
+}
+
+// ── Setup helpers ─────────────────────────────────────────────────
+function renderNameInputs(n) {
+  const section = $('player-names-section');
+  section.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const row = document.createElement('div');
+    row.className = 'name-input-row';
+    row.innerHTML = `<label class="setup-label">Player ${i + 1}</label>
+      <input class="name-input" type="text" maxlength="12"
+             placeholder="Player ${i + 1}" data-idx="${i}">`;
+    section.appendChild(row);
+  }
+}
+
+// ── Betting phase ─────────────────────────────────────────────────
+function startBettingPhase() {
+  state.phase = 'betting';
+  state.currentBetIdx = 0;
+  showBetForPlayer(0);
+}
+
+function showBetForPlayer(idx) {
+  state.currentBetIdx = idx;
+  // Update bank bar to show this player's bank
+  $('bank-player-label').textContent = `${state.setupNames[idx]}:`;
+  bankAmount.textContent = `$${state.setupBanks[idx].toLocaleString()}`;
+  // Show whose turn it is to bet
+  const ind = $('betting-player-indicator');
+  ind.textContent = `${state.setupNames[idx]}'s Bet`;
+  ind.classList.remove('hidden');
+  // Show this player's current staged bet
+  betAmount.textContent = state.bets[idx] || 0;
+  // Last player's button says "Deal", others say "Confirm"
+  $('btn-deal').textContent = (idx === state.numPlayers - 1) ? 'Deal' : 'Confirm';
+  showPanel('bet');
 }
 
 // ── Deal ──────────────────────────────────────────────────────────
 function deal() {
-  if (state.bet < 1) { speak('greet'); return; }
-
   state.phase = 'playing';
   state.currentIdx = 0;
 
-  // Setup players (single player for now – easily extendable)
-  state.players = [{
-    name:   'Player',
-    bank:   state.bank,
-    bet:    state.bet,
-    hand:   [],
-    status: 'playing',
-  }];
-  state.bank -= state.bet;
-  updateBank();
+  // Build players array from staged bets, deduct bets from banks
+  state.players = state.setupNames.map((name, i) => {
+    state.setupBanks[i] -= state.bets[i];
+    return {
+      name,
+      bank:   state.setupBanks[i],
+      bet:    state.bets[i],
+      hand:   [],
+      status: 'playing',
+      outcome: null,
+    };
+  });
 
-  // Dealer hand
+  updateBankForCurrent();
   state.dealer.hand = [];
-
   playersZone.innerHTML = '';
 
-  // Deal two cards each
-  const dealOrder = [0, 'dealer', 0, 'dealer'];
+  // Deal round-robin: p0→p1→…→pN-1→dealer→p0→p1→…→pN-1→dealer
+  const dealOrder = [];
+  for (let i = 0; i < state.players.length; i++) dealOrder.push(i);
+  dealOrder.push('dealer');
+  for (let i = 0; i < state.players.length; i++) dealOrder.push(i);
+  dealOrder.push('dealer');
+
   let delay = 0;
   dealOrder.forEach((who, step) => {
     setTimeout(() => {
       const card = drawCard();
       if (who === 'dealer') {
-        const hide = step === 3; // second dealer card is hidden
+        const hide = (step === dealOrder.length - 1); // last dealer card is hidden
         if (hide) state.dealer.hiddenCard = card;
         state.dealer.hand.push(card);
         renderDealerHand(false);
-        // animate last appended card
         const cards = dealerHandEl.querySelectorAll('.card');
         cards[cards.length - 1].classList.add('dealing');
         speak('deal');
@@ -257,46 +304,39 @@ function deal() {
     delay += 350;
   });
 
-  setTimeout(() => {
-    checkForImmediateBlackjack();
-  }, delay + 200);
+  setTimeout(() => checkForImmediateBlackjack(), delay + 200);
 }
 
 function checkForImmediateBlackjack() {
-  const player = state.players[0];
   const dealerBJ = isBlackjack(state.dealer.hand);
+  let anyPlayerBJ = false;
 
-  if (isBlackjack(player.hand)) {
-    speak('blackjack');
-    highlightSeat21(0);
-    // Reveal dealer card now
+  state.players.forEach((player, idx) => {
+    if (isBlackjack(player.hand)) {
+      anyPlayerBJ = true;
+      speak('blackjack');
+      highlightSeat21(idx);
+      player.status = 'blackjack';
+    }
+  });
+
+  if (anyPlayerBJ || dealerBJ) {
     revealDealerCard();
     renderDealerHand(true);
-
-    setTimeout(() => {
-      if (dealerBJ) {
-        endRound('push');
-      } else {
-        endRound('blackjack');
-      }
-    }, 1000);
+    speak(dealerBJ ? 'dealerBJ' : 'blackjack');
+    setTimeout(() => resolveResults(), 1000);
     return;
   }
 
-  if (dealerBJ) {
-    revealDealerCard();
-    renderDealerHand(true);
-    speak('dealerBJ');
-    setTimeout(() => endRound('dealer_blackjack'), 1000);
-    return;
-  }
-
-  // Check if player has 21 without blackjack (shouldn't happen on first deal but safety)
-  if (is21(player.hand) && !isBlackjack(player.hand)) {
+  // Auto-pass first active player if they have 21 without blackjack
+  const first = state.players[0];
+  if (is21(first.hand) && !isBlackjack(first.hand)) {
     autoPass21();
     return;
   }
 
+  $('action-player-name').textContent = state.players[0].name;
+  updateBankForCurrent();
   showPanel('action');
 }
 
@@ -312,7 +352,6 @@ function autoPass21() {
   highlightSeat21(state.currentIdx);
   player.status = 'stand';
   refreshAllSeats();
-  // Short pause then move on
   setTimeout(() => advanceTurn(), 900);
 }
 
@@ -363,16 +402,17 @@ function stand() {
 // ── Double Down ───────────────────────────────────────────────────
 function doubleDown() {
   const player = state.players[state.currentIdx];
-  if (state.bank < player.bet) return;
-  state.bank -= player.bet;
+  if (state.setupBanks[state.currentIdx] < player.bet) return;
+  state.setupBanks[state.currentIdx] -= player.bet;
+  player.bank = state.setupBanks[state.currentIdx];
   player.bet *= 2;
-  updateBank();
+  updateBankForCurrent();
 
   const card = drawCard();
   player.hand.push(card);
 
-  const seat = $(`seat-${state.currentIdx}`);
   renderPlayerSeat(player, state.currentIdx);
+  const seat = $(`seat-${state.currentIdx}`);
   if (seat) {
     const cards = seat.querySelectorAll('.card');
     cards[cards.length - 1].classList.add('dealing');
@@ -409,7 +449,8 @@ function advanceTurn() {
   const next = state.players[state.currentIdx];
   refreshAllSeats();
 
-  if (next.status === 'bust') {
+  // Skip players who are already resolved
+  if (next.status === 'bust' || next.status === 'stand' || next.status === 'blackjack') {
     advanceTurn();
     return;
   }
@@ -420,6 +461,8 @@ function advanceTurn() {
     return;
   }
 
+  $('action-player-name').textContent = next.name;
+  updateBankForCurrent();
   showPanel('action');
 }
 
@@ -432,7 +475,7 @@ function dealerTurn() {
   const allBust = state.players.every(p => p.status === 'bust');
 
   if (allBust) {
-    setTimeout(() => endRound('dealer_wins_all_bust'), 800);
+    setTimeout(() => resolveResults(), 800);
     return;
   }
 
@@ -459,117 +502,130 @@ function dealerTurn() {
 function resolveResults() {
   const dealerTotal = handTotal(state.dealer.hand);
   const dealerBust  = isBust(state.dealer.hand);
-  const player      = state.players[0];
-  const playerTotal = handTotal(player.hand);
+  const dealerBJ    = isBlackjack(state.dealer.hand);
 
-  let outcome;
+  state.players.forEach((player, idx) => {
+    const playerTotal = handTotal(player.hand);
+    const playerBJ    = isBlackjack(player.hand) || player.status === 'blackjack';
 
-  if (player.status === 'bust') {
-    outcome = 'lose';
-  } else if (dealerBust) {
-    outcome = 'win';
-  } else if (playerTotal > dealerTotal) {
-    outcome = 'win';
-  } else if (playerTotal < dealerTotal) {
-    outcome = 'lose';
-  } else {
-    outcome = 'push';
-  }
+    let outcome;
+    if (player.status === 'bust') {
+      outcome = 'lose';
+    } else if (dealerBJ && playerBJ) {
+      outcome = 'push';
+    } else if (dealerBJ) {
+      outcome = 'dealer_blackjack';
+    } else if (playerBJ) {
+      outcome = 'blackjack';
+    } else if (dealerBust) {
+      outcome = 'win';
+    } else if (playerTotal > dealerTotal) {
+      outcome = 'win';
+    } else if (playerTotal < dealerTotal) {
+      outcome = 'lose';
+    } else {
+      outcome = 'push';
+    }
 
-  endRound(outcome);
+    player.outcome = outcome;
+
+    // Apply payout to persistent bank
+    let payout = 0;
+    switch (outcome) {
+      case 'blackjack':       payout = Math.floor(player.bet * 2.5); break;
+      case 'push':            payout = player.bet; break;
+      case 'win':             payout = player.bet * 2; break;
+      default:                payout = 0;
+    }
+    state.setupBanks[idx] += payout;
+    player.bank = state.setupBanks[idx];
+  });
+
+  endRound();
 }
 
-function endRound(outcome) {
+function endRound() {
   state.phase = 'result';
   showPanel('result');
 
-  const player = state.players[0];
-  let msg = '', cls = '', payout = 0;
+  const lines = state.players.map(p => {
+    switch (p.outcome) {
+      case 'blackjack':
+        return `${p.name}: ♛ BLACKJACK! +$${Math.floor(p.bet * 1.5)}`;
+      case 'push':
+        return `${p.name}: PUSH`;
+      case 'win':
+        return `${p.name}: WIN +$${p.bet}`;
+      case 'lose':
+      case 'dealer_blackjack':
+      default:
+        return `${p.name}: LOSE -$${p.bet}`;
+    }
+  });
 
-  switch (outcome) {
-    case 'blackjack':
-      payout = Math.floor(player.bet * 2.5); // 3:2 pays 2.5×
-      msg = `♛ BLACKJACK! +$${payout - player.bet}`;
-      cls = 'result-bj';
-      speak('blackjack');
-      break;
-    case 'push':
-      payout = player.bet;
-      msg = `PUSH – Bet Returned`;
-      cls = 'result-push';
-      speak('push');
-      break;
-    case 'win':
-      payout = player.bet * 2;
-      msg = `YOU WIN! +$${player.bet}`;
-      cls = 'result-win';
-      speak('win');
-      break;
-    case 'lose':
-    case 'dealer_wins_all_bust':
-      payout = 0;
-      msg = `DEALER WINS. -$${player.bet}`;
-      cls = 'result-lose';
-      speak('lose');
-      break;
-    case 'dealer_blackjack':
-      payout = 0;
-      msg = `DEALER BLACKJACK. -$${player.bet}`;
-      cls = 'result-lose';
-      speak('lose');
-      break;
-    default:
-      payout = 0;
-      msg = 'DEALER WINS.';
-      cls = 'result-lose';
-  }
+  resultMsg.innerHTML = lines.join('<br>');
 
-  state.bank += payout;
-  updateBank();
+  const wins   = state.players.filter(p => ['win', 'blackjack'].includes(p.outcome)).length;
+  const losses = state.players.filter(p => !['win', 'blackjack', 'push'].includes(p.outcome)).length;
+  resultMsg.className = wins > losses ? 'result-win' : wins < losses ? 'result-lose' : 'result-push';
 
-  resultMsg.className = cls;
-  resultMsg.textContent = msg;
+  speak(wins > losses ? 'win' : wins < losses ? 'lose' : 'push');
+  refreshAllSeats();
+
+  // Update bank bar to show Player 1's bank after round
+  $('bank-player-label').textContent = `${state.setupNames[0]}:`;
+  bankAmount.textContent = `$${state.setupBanks[0].toLocaleString()}`;
 }
 
 // ── Next hand ─────────────────────────────────────────────────────
 function nextHand() {
-  state.phase   = 'betting';
-  state.bet     = 0;
-  betAmount.textContent = '0';
-  state.players = [];
-  state.dealer  = { hand: [], hiddenCard: null };
-  playersZone.innerHTML = '';
-  dealerHandEl.innerHTML = '';
-  dealerScoreEl.textContent = '0';
-  dealerScoreEl.className = 'score-badge';
-
-  if (state.bank < 5) {
-    state.bank = 1000;
-    updateBank();
+  // Rebuy any broke players
+  for (let i = 0; i < state.numPlayers; i++) {
+    if (state.setupBanks[i] < 5) state.setupBanks[i] = 1000;
   }
 
-  showPanel('bet');
+  state.bets    = Array(state.numPlayers).fill(0);
+  state.players = [];
+  state.dealer  = { hand: [], hiddenCard: null };
+
+  playersZone.innerHTML   = '';
+  dealerHandEl.innerHTML  = '';
+  dealerScoreEl.textContent = '0';
+  dealerScoreEl.className   = 'score-badge';
+
   speak('next');
+  startBettingPhase();
 }
 
 // ── Event listeners ───────────────────────────────────────────────
 document.querySelectorAll('.chip-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const val = parseInt(btn.dataset.val, 10);
-    if (state.bank - state.bet >= val) {
-      state.bet += val;
-      betAmount.textContent = state.bet;
+    const idx = state.currentBetIdx;
+    if (state.setupBanks[idx] - (state.bets[idx] || 0) >= val) {
+      state.bets[idx] = (state.bets[idx] || 0) + val;
+      betAmount.textContent = state.bets[idx];
     }
   });
 });
 
 $('btn-clear-bet').addEventListener('click', () => {
-  state.bet = 0;
+  state.bets[state.currentBetIdx] = 0;
   betAmount.textContent = '0';
 });
 
 $('btn-deal').addEventListener('click', () => {
-  if (state.bet > 0 && state.bet <= state.bank) deal();
+  const idx = state.currentBetIdx;
+  const bet = state.bets[idx] || 0;
+  if (bet < 1 || bet > state.setupBanks[idx]) return;
+
+  const next = idx + 1;
+  if (next < state.numPlayers) {
+    state.bets[next] = state.bets[next] || 0;
+    showBetForPlayer(next);
+  } else {
+    deal();
+  }
 });
 
 $('btn-hit').addEventListener('click', hit);
@@ -577,8 +633,34 @@ $('btn-stand').addEventListener('click', stand);
 $('btn-double').addEventListener('click', doubleDown);
 $('btn-next').addEventListener('click', nextHand);
 
+// ── Setup modal ───────────────────────────────────────────────────
+document.querySelectorAll('.count-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderNameInputs(parseInt(btn.dataset.n, 10));
+  });
+});
+
+$('btn-start-game').addEventListener('click', () => {
+  const activeBtn = document.querySelector('.count-btn.active');
+  const n = parseInt(activeBtn.dataset.n, 10);
+  const inputs = document.querySelectorAll('.name-input');
+
+  state.numPlayers  = n;
+  state.setupNames  = Array.from({ length: n }, (_, i) =>
+    (inputs[i] ? inputs[i].value.trim() : '') || `Player ${i + 1}`
+  );
+  state.setupBanks  = Array(n).fill(1000);
+  state.bets        = Array(n).fill(0);
+  state.currentBetIdx = 0;
+
+  $('setup-modal').classList.add('hidden');
+  speak('greet');
+  startBettingPhase();
+});
+
 // ── Init ─────────────────────────────────────────────────────────
 initDeck();
-updateBank();
-speak('greet');
-showPanel('bet');
+renderNameInputs(1);
+updateBankForCurrent();
